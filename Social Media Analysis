@@ -1,0 +1,267 @@
+/*1q.	Are there any tables with duplicate or missing null values? If so, how would you handle them?
+ for checking similarly done for all tables */
+
+  SELECT * FROM ig_clone.users
+  where null in (id,username,created_at) ;
+  -- for checking duplicates
+  SELECT id,username FROM ig_clone.users
+  group by id 
+  having count(*)>1;
+
+-- 2.	What is the distribution of user activity levels (e.g., number of posts, likes, comments) across the user base.
+  with pics as(
+  SELECT user_id, count(photo_id) total_likes FROM ig_clone.likes
+  group by user_id),
+  
+  tag as(
+  SELECT p.user_id,count(tag_id) as total_tags FROM ig_clone.photo_tags p_tag
+  inner join photos p on 
+  p_tag.photo_id=p.id
+  group by user_id
+  order by user_id),
+  
+  comments_pic as(
+  SELECT user_id,count(photo_id) as total_comments FROM ig_clone.comments
+  group by user_id)
+  
+  select u.id,u.username,total_comments,total_tags,total_likes
+  from users u 
+  left join  comments_pic c 
+  on u.id=c.user_id
+  left join pics p
+  on u.id= p.user_id
+  left join tag t
+  on u.id=t.user_id;
+
+
+-- 3q. Calculate the average number of tags per post (photo_tags and photos tables).
+  select photo_id,
+  round(count(tag_id)*100.0/(select count(distinct photo_id) from photo_tags),2) as avg_tag 
+  from photo_tags
+  group by photo_id
+  order by avg_tag desc;
+
+
+-- 4q.Identify the top users with the highest engagement rates (likes, comments) on their posts and rank them.
+
+  with cte_likes as(
+  SELECT user_id,count(photo_id) as total_likes FROM ig_clone.likes
+  group by user_id
+  order by total_likes desc),
+  cte_comments as(SELECT user_id,count(photo_id) as total_no_of_comments FROM ig_clone.comments
+  group by user_id
+  order by total_no_of_comments desc)
+  
+  select u.id,u.username, l.total_likes,c.total_no_of_comments,
+  dense_rank()over(order by total_likes desc,total_no_of_comments desc) as top_rank 
+  from users u
+  inner join cte_likes l 
+  on u.id=l.user_id
+  inner join cte_comments c 
+  on u.id=c.user_id;
+
+
+
+-- 5q.Calculate the average engagement rate (likes, comments) per post for each user.
+  with user_engagement_on_likes as(
+  SELECT user_id, 
+  round(count(photo_id)/(select count(distinct user_id) from likes),2)as avg_engagement_on_photo 
+  FROM ig_clone.likes
+  group by user_id
+  ),
+  
+  user_engagement_on_comments as(
+  SELECT user_id,
+  round(count(photo_id)/(select count(distinct user_id) from comments),2)as avg_engagement_on_comment 
+  FROM ig_clone.comments
+  group by user_id 
+  )
+  
+  select l.user_id,avg_engagement_on_photo,avg_engagement_on_comment 
+  from user_engagement_on_likes l
+  inner join user_engagement_on_comments c 
+  on l.user_id=c.user_id
+  order by avg_engagement_on_photo desc,avg_engagement_on_comment desc ;
+
+-- 6q.	Get the list of users who have never liked any post.
+  SELECT id,username FROM users
+  where id not in (select distinct user_id from likes)
+  order by id ;
+
+-- 9q.	Calculate the total number of likes, comments, and photo tags for each user.
+  with pics as(
+  SELECT user_id, count(photo_id) total_likes FROM ig_clone.likes
+  group by user_id),
+  
+  tag as(
+  SELECT p.user_id,count(tag_id) as total_tags FROM ig_clone.photo_tags p_tag
+  inner join photos p on 
+  p_tag.photo_id=p.id
+  group by user_id
+  order by user_id),
+  
+  comments_pic as(
+  SELECT user_id,count(photo_id) as total_comments FROM ig_clone.comments
+  group by user_id)
+  
+  select u.id,u.username,total_comments,total_tags,total_likes 
+  from users u 
+  left join  comments_pic c 
+  on u.id=c.user_id
+  left join pics p
+  on u.id= p.user_id
+  left join tag t
+  on u.id=t.user_id
+  order by u.id asc;
+
+-- 10q.	Rank users based on their total engagement (likes, comments, shares) over a month.
+
+  with pics as(
+  SELECT user_id, count(photo_id) total_likes FROM ig_clone.likes
+  group by user_id),
+  
+  tag as(
+  SELECT p.user_id,count(tag_id) as total_tags FROM ig_clone.photo_tags p_tag
+  inner join photos p on 
+  p_tag.photo_id=p.id
+  group by user_id
+  order by user_id),
+  
+  comments_pic as(
+  SELECT user_id,count(photo_id) as total_comments FROM ig_clone.comments
+  group by user_id),
+  
+  user_ranking as(
+  select u.id,u.username,total_comments,total_tags,total_likes
+  from users u 
+  left join  comments_pic c 
+  on u.id=c.user_id
+  left join pics p
+  on u.id= p.user_id
+  left join tag t
+  on u.id=t.user_id
+  where u.created_at in (select created_at from users where extract(month from created_at)='06')
+  )
+  select id,
+  username, 
+  rank()over(order by total_comments desc,total_tags desc,total_likes desc) as `rank`
+  from user_ranking;
+
+/* 11q.	Retrieve the hashtags that have been used in posts with the highest average number of likes. 
+Use a CTE to calculate the average likes for each hashtag first.*/
+
+use ig_clone;
+with user_likes as(
+select user_id,round(count(photo_id)*1.0/(select count(distinct user_id) from likes ),2) as avg_likes from likes
+group by user_id),
+
+ user_pics as(
+select u.user_id,avg_likes,id from user_likes u
+inner join photos p 
+on u.user_id=p.user_id),
+
+user_tag as(
+select * from user_pics up
+inner join photo_tags pt
+on up.id=pt.photo_id
+)
+select tag_name,max(avg_likes) as avg_likes from user_tag u
+inner join tags t
+on u.tag_id=t.id
+group by tag_name
+order by avg_likes desc
+limit 10;
+
+-- 12.	Retrieve the users who have started following someone after being followed by that person
+select COALESCE(
+(select distinct username from users u
+inner join follows f1
+on u.id=f1.follower_id
+join follows f2 
+on u.id=f2.followee_id
+where f1.created_at<f2.created_at),Null) as username;
+
+-- 13q.Which users have the highest number of followers and followings?
+with highest_follower_id as(
+select follower_id,count(followee_id) as total_followee 
+from follows
+group by follower_id),
+highest_followee_id as (
+select followee_id,count(follower_id) as total_follower
+from follows
+group by followee_id)
+
+select id,username,total_followee,total_follower from users u 
+inner join highest_follower_id as f1
+on u.id=f1.follower_id
+inner join highest_followee_id f2
+on u.id=f2.followee_id
+order by total_followee desc,total_follower desc;
+
+                                               /*  SUBJECTIVE QUESTIONS */
+/*1.	Based on user engagement and activity levels, which users would you consider the most loyal or valuable? 
+How would you reward or incentivize these users? */
+
+with pics as(
+SELECT user_id, count(photo_id) total_likes FROM ig_clone.likes
+group by user_id),
+
+tag as(
+SELECT p.user_id,count(tag_id) as total_tags FROM ig_clone.photo_tags p_tag
+inner join photos p on 
+p_tag.photo_id=p.id
+group by user_id
+order by user_id),
+
+comments_pic as(
+SELECT user_id,count(photo_id) as total_comments FROM ig_clone.comments
+group by user_id),
+
+user_ranking as(
+select u.id,u.username,total_comments,total_tags,total_likes
+from users u 
+left join  comments_pic c 
+on u.id=c.user_id
+left join pics p
+on u.id= p.user_id
+left join tag t
+on u.id=t.user_id
+where u.created_at in (select created_at from users where extract(month from created_at)='06')
+)
+select id,
+username, 
+rank()over(order by total_comments desc,total_tags desc,total_likes desc) as `rank`
+from user_ranking;
+
+/* 3.	Which hashtags or content topics have the highest engagement rates? 
+How can this information guide content strategy and ad campaigns? */
+
+with activity_level as(
+SELECT user_id,a.id,username,total_comments,total_tags,total_likes 
+FROM ig_clone.user_activity a 
+inner join photos p 
+on p.user_id=a.id),
+
+tag_user as(
+select * from activity_level l 
+inner join photo_tags t 
+on l.id=t.photo_id),
+
+activity_tag as(
+select t.id,t.tag_name,total_comments,total_tags,total_likes,photo_id from tag_user u
+inner join tags t 
+on t.id=u.tag_id)
+
+select id,tag_name,total_comments,total_tags,total_likes
+from activity_tag at
+order by total_comments desc,total_tags desc,total_likes desc;
+
+/* 8.	How can you use user activity data to identify potential brand ambassadors or
+ advocates who could help promote Instagram's initiatives or events? */
+ 
+SELECT u.id,u.username,total_followee,total_follower,total_comments,total_tags,total_likes
+ FROM ig_clone.max_following m
+inner join user_activity u
+on m.id=u.id
+inner join user_ranking r
+on u.id=r.id;
